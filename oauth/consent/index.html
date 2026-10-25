@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSO Claude Bridge 접근 허용</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#dde1e6; --ok:#1f7a4d; --no:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --card:#1d2126; --ink:#e8eaed; --muted:#a0a8b2; --line:#30363d; --ok:#4cc38a; --no:#ff8a80; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  main { max-width:480px; margin:40px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  p.muted { color:var(--muted); margin:4px 0 16px; }
+  table { width:100%; border-collapse:collapse; margin:12px 0 20px; }
+  td { border-top:1px solid var(--line); padding:8px 4px; vertical-align:top; }
+  td:first-child { color:var(--muted); width:30%; }
+  input { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font-size:16px; }
+  button { padding:10px 16px; border-radius:8px; border:1px solid var(--line); font-size:16px; cursor:pointer; margin:8px 8px 0 0; }
+  .ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .no { background:transparent; color:var(--no); border-color:var(--no); }
+  #msg { margin-top:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main><div class="card" id="app"><h1>MSO Claude Bridge</h1><p class="muted">불러오는 중…</p></div></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+<script>
+  // 공개 키(publishable)만 사용한다. 비밀키는 이 파일에 넣지 않는다.
+  const SUPABASE_URL = "https://elgcfjrrgihkoklmbveb.supabase.co";
+  const PUBLISHABLE_KEY = "sb_publishable_-DZTXt9AF3OFPDr1Xi0lgg_9iXcarhV";
+  const sb = supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY);
+  const app = document.getElementById("app");
+  const params = new URLSearchParams(location.search);
+  const authorizationId = params.get("authorization_id");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+  function show(html) { app.innerHTML = "<h1>MSO Claude Bridge</h1>" + html; }
+
+  async function signInForm() {
+    show(`<p class="muted">ChatGPT가 Claude 검토 도구에 접근하려고 합니다. 먼저 등록된 이메일로 로그인하세요.</p>
+      <input id="email" type="email" placeholder="등록된 이메일" autocomplete="email">
+      <button class="ok" id="send">로그인 링크 받기</button><div id="msg"></div>`);
+    document.getElementById("send").onclick = async () => {
+      const email = document.getElementById("email").value.trim();
+      if (!email) return;
+      const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.href } });
+      document.getElementById("msg").textContent = error
+        ? "보낼 수 없습니다: 등록된 이메일인지 확인하세요."
+        : "메일함의 로그인 링크를 누르면 이 화면으로 돌아옵니다.";
+    };
+  }
+
+  async function main() {
+    if (!authorizationId) { show('<p class="muted">잘못된 접근입니다(authorization_id 없음).</p>'); return; }
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return signInForm();
+
+    const { data, error } = await sb.auth.oauth.getAuthorizationDetails(authorizationId);
+    if (error) { show(`<p class="muted">요청을 불러오지 못했습니다. ChatGPT에서 다시 연결하세요.</p>`); return; }
+    if (data.redirect_url) { location.href = data.redirect_url; return; } // 이미 허용한 경우
+
+    show(`<p class="muted">아래 앱이 내 계정으로 Claude 검토 도구를 쓰도록 허용할까요?</p>
+      <table>
+        <tr><td>앱</td><td>${esc(data.client?.name || data.client?.client_name || data.client?.client_id)}</td></tr>
+        <tr><td>돌아갈 주소</td><td>${esc(data.redirect_uri)}</td></tr>
+        <tr><td>권한</td><td>${esc(data.scope) || "(기본)"}</td></tr>
+        <tr><td>로그인 계정</td><td>${esc(data.user?.email)}</td></tr>
+      </table>
+      <p class="muted">돌아갈 주소가 chatgpt.com 이 아니면 거부하세요.</p>
+      <button class="ok" id="yes">허용</button><button class="no" id="nope">거부</button><div id="msg"></div>`);
+    document.getElementById("yes").onclick = () => sb.auth.oauth.approveAuthorization(authorizationId);
+    document.getElementById("nope").onclick = () => sb.auth.oauth.denyAuthorization(authorizationId);
+  }
+  main();
+</script>
+</body>
+</html>
